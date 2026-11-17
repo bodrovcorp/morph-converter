@@ -14,7 +14,11 @@ $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.e
 $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vs) { throw 'Нужны Visual Studio Build Tools с компонентом C++' }
 $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
-$sdkBin = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64" | Sort-Object Name -Descending | Select-Object -First 1
+# самая новая версия SDK, в которой есть makeappx
+$sdkBin = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64" |
+  Where-Object { Test-Path (Join-Path $_.FullName 'makeappx.exe') } |
+  Sort-Object { [version]$_.Parent.Name } -Descending | Select-Object -First 1
+if (-not $sdkBin) { throw 'Не найден makeappx.exe (Windows SDK)' }
 $makeappx = Join-Path $sdkBin.FullName 'makeappx.exe'
 $signtool = Join-Path $sdkBin.FullName 'signtool.exe'
 
