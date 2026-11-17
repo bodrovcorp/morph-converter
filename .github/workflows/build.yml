@@ -1,5 +1,5 @@
 # Morph: сборка установщиков (.dmg для macOS, .exe/.msi для Windows) и автотесты ядра.
-# Исходники лежат в репозитории архивом Morph.zip — workflow распаковывает его и собирает.
+# Исходники лежат в репозитории архивом Morph.zip — workflow распаковывает его, накладывает overlay/ и собирает.
 # Готовые установщики публикуются на странице Releases репозитория.
 name: build
 
@@ -35,6 +35,8 @@ jobs:
       - name: Распаковка исходников
         run: |
           if [ -f Morph.zip ]; then unzip -q -o Morph.zip -d src || 7z x -y -osrc Morph.zip; else mkdir -p src && cp -R . src/morph; fi
+          # исправления поверх архива (папка overlay/ в репозитории)
+          if [ -d overlay ]; then cp -R overlay/. src/morph/; echo "overlay:"; (cd overlay && find . -type f); fi
           ls src/morph
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -50,11 +52,8 @@ jobs:
       - name: Движки (macOS)
         if: runner.os == 'macOS'
         continue-on-error: true
-        timeout-minutes: 25
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-          HOMEBREW_NO_INSTALL_CLEANUP: "1"
-        run: WITH_MAGICK=1 bash src/morph/scripts/fetch-engines.sh
+        timeout-minutes: 10
+        run: bash src/morph/scripts/fetch-engines.sh
       - name: Движки (Windows)
         if: runner.os == 'Windows'
         continue-on-error: true
