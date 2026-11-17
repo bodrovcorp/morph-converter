@@ -1,0 +1,131 @@
+# Morph: сборка установщиков (.dmg для macOS, .exe/.msi для Windows) и автотесты ядра.
+# Исходники лежат в репозитории архивом Morph.zip — workflow распаковывает его и собирает.
+# Готовые установщики публикуются на странице Releases репозитория.
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS Apple Silicon, os: macos-15, target: aarch64-apple-darwin }
+          - { name: macOS Intel, os: macos-15-intel, target: x86_64-apple-darwin }
+          - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Распаковка исходников
+        run: |
+          if [ -f Morph.zip ]; then unzip -q -o Morph.zip -d src || 7z x -y -osrc Morph.zip; else mkdir -p src && cp -R . src/morph; fi
+          ls src/morph
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/morph/app/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tauri CLI
+        run: npm i -g @tauri-apps/cli@2
+      - name: Движки (macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        timeout-minutes: 25
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: WITH_MAGICK=1 bash src/morph/scripts/fetch-engines.sh
+      - name: Движки (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./src/morph/scripts/fetch-engines.ps1
+      - name: Пункт нового меню Windows 11
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: pwsh
+        run: ./src/morph/integrations/windows/build-modern-menu.ps1
+      - name: Сборка установщика
+        working-directory: src/morph/app/src-tauri
+        run: tauri build --target ${{ matrix.target }}
+      - name: Сбор файлов
+        run: |
+          mkdir -p out
+          B=src/morph/app/src-tauri/target/${{ matrix.target }}/release/bundle
+          cp $B/dmg/*.dmg out/ 2>/dev/null || true
+          cp $B/nsis/*.exe out/ 2>/dev/null || true
+          cp $B/msi/*.msi out/ 2>/dev/null || true
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Morph-${{ matrix.target }}
+          path: out/*
+
+  core-tests:
+    name: Автотесты ядра (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - run: unzip -q -o Morph.zip -d src
+      - name: Движки
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg imagemagick libreoffice-writer libreoffice-calc libreoffice-impress pandoc qpdf poppler-utils librsvg2-bin zip unzip
+          pip install --break-system-packages python-docx openpyxl python-pptx
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python3 tests/make_fixtures.py
+        working-directory: src/morph
+      - run: cargo test --release -- --test-threads=2
+        working-directory: src/morph/core
+
+  release:
+    name: Публикация в Releases
+    needs: bundle
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -la dist
+      - uses: softprops/action-gh-release@v2
+        if: hashFiles('dist/*') != ''
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Morph — сборка ${{ github.run_number }}
+          make_latest: true
+          files: dist/*
+          body: |
+            Установщики Morph.
+            • macOS Apple Silicon (M1–M4): файл с `aarch64` в имени, .dmg
+            • macOS Intel: файл с `x64` в имени, .dmg
+            • Windows 10/11: `x64-setup.exe` (или .msi)
+
+            Первый запуск на macOS: Системные настройки → Конфиденциальность и безопасность → «Всё равно открыть».
+            Windows SmartScreen: «Подробнее» → «Выполнить в любом случае».
