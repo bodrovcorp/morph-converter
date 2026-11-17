@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "targets": ["nsis"],
+    "resources": {
+      "../../integrations/": null,
+      "../../integrations/windows/": "integrations/windows/"
+    }
+  }
+}
