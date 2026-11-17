@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "resources": {
+      "../../integrations/": null,
+      "../../integrations/macos/": "integrations/macos/"
+    }
+  }
+}
